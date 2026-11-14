@@ -73,8 +73,8 @@ class Repo(unittest.TestCase):
             readme = " ".join(fh.read().split())
         self.assertTrue(readme.startswith("# The Day Trader skill"))
         for line in (ABOUT,
-                     "https://github.com/savelieve/day-trader-skill-improved install skill",
-                     "/plugin marketplace add savelieve/day-trader-skill-improved",
+                     "https://github.com/savelieve/day-trader-skill install skill",
+                     "/plugin marketplace add savelieve/day-trader-skill",
                      "/plugin install day-trader-skill@day-trader-skill",
                      "## Fine print"):
             self.assertIn(line, readme)

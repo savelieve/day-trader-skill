@@ -1,4 +1,4 @@
-# The Day Trader skill - improved
+# The Day Trader skill
 
 11 Claude skills for day trading: scan thousands of charts, track breaking news, time every entry and exit, and replay every outcome before you risk a dollar.
 
@@ -36,7 +36,7 @@ use. Exchange calendar support is limited to 2026 and 2027.
 Paste this into Claude:
 
 ```
-https://github.com/savelieve/day-trader-skill-improved
+https://github.com/savelieve/day-trader-skill
 
 install skill
 ```
@@ -44,7 +44,7 @@ install skill
 Or as a plugin, in Claude Code:
 
 ```
-/plugin marketplace add savelieve/day-trader-skill-improved
+/plugin marketplace add savelieve/day-trader-skill
 /plugin install day-trader-skill@day-trader-skill
 ```
 
@@ -53,8 +53,8 @@ Claude Code namespaces plugin skills, so installed as a plugin they show up as
 plain `/trader-scanner`:
 
 ```bash
-git clone https://github.com/savelieve/day-trader-skill-improved.git
-cp -r day-trader-skill-improved/trader-* ~/.claude/skills/
+git clone https://github.com/savelieve/day-trader-skill.git
+cp -r day-trader-skill/trader-* ~/.claude/skills/
 ```
 
 Project-local instead of global: copy the same folders into your repo's
