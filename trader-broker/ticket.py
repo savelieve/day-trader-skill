@@ -270,31 +270,11 @@ def amount_numbers(order):
 
 def parse_yes(reply, order, batch_symbols=()):
     """Is this reply an explicit yes for THIS one order? Returns (ok, why)."""
-    raw = (reply or "").strip()
-    if not raw:
-        return False, "the reply is empty"
-    if "?" in raw:
-        return False, "the reply is a question, not a yes"
-    words = re.findall(r"[a-z']+", raw.lower())
-    if not words or words[0] not in YES_WORDS:
-        return False, "only a reply that starts with \"yes\" counts (not ok, sure, go, do it)"
-    if BATCH_WORDS & set(words):
-        return False, "a yes covers one order at a time, not a batch"
-    if DOUBT_WORDS & set(words[1:]):
-        return False, "the reply has a condition or a doubt in it; ask again"
-    sym = str(order.get("symbol", "")).upper()
-    tokens = set(re.findall(r"[A-Z][A-Z.\-]{0,6}", raw.upper()))
-    others = {s.upper() for s in batch_symbols} - {sym}
-    named = tokens & others
-    if named:
-        return False, "the reply names %s, but this order is for %s" % (", ".join(sorted(named)), sym)
-    nums = [float(n.replace(",", "")) for n in re.findall(r"\d[\d,]*(?:\.\d+)?", raw)]
-    if nums:
-        want = amount_numbers(order)
-        if not any(abs(n - w) < 0.005 for n in nums for w in want):
-            return False, "the reply says %s, but this order is %s" % (
-                ", ".join(_str_num(n) for n in nums), plain(order))
+    raw = (reply or "").strip().lower().rstrip(".! ")
+    if raw not in ("yes", "y"):
+        return False, "reply with only yes or no for the displayed ticket"
     return True, "explicit yes for %s" % plain(order)
+
 
 
 # ---------------------------------------------------------------- state
@@ -315,6 +295,8 @@ def latest(state, fp, today):
 def risk_verdict(risk, fp, today):
     if not risk:
         return None, "trader-risk has not checked these orders (run check.py)"
+    if risk.get("validation_error"):
+        return None, risk["validation_error"]
     if risk.get("date") != today:
         return None, "the risk check is from %s, not today; run check.py again" % risk.get("date")
     for r in risk.get("results", []):
@@ -326,17 +308,17 @@ def risk_verdict(risk, fp, today):
 def status_of(order, risk, state, today):
     """(ready, label, risk_result)"""
     fp = fingerprint(order)
+    rec = latest(state, fp, today)
+    if rec:
+        st = rec.get("status")
+        if st == "approved":
+            return False, "APPROVED by you at %s, waiting for the place_stock_order call" % rec.get("at"), None
+        return False, "DONE: %s at %s" % (st, rec.get("at")), None
     rv, why = risk_verdict(risk, fp, today)
     if rv is None:
         return False, "NOT READY: " + why, None
     if rv.get("verdict") != "PASS":
         return False, "BLOCKED by trader-risk: " + "; ".join(rv.get("reasons", [])), rv
-    rec = latest(state, fp, today)
-    if rec:
-        st = rec.get("status")
-        if st == "approved":
-            return False, "APPROVED by you at %s, waiting for the place_stock_order call" % rec.get("at"), rv
-        return False, "DONE: %s at %s" % (st, rec.get("at")), rv
     return True, "READY: trader-risk PASS, waiting for your yes", rv
 
 
@@ -466,8 +448,22 @@ def _load(a):
         raise TicketError("no orders in %s" % a.orders)
     cfg = read_json(a.config, "config", required=False) or {}
     risk = read_json(a.risk, "risk check", required=False)
-    state = load_state(a.state)
+    raw_state = read_json(a.state, "broker state", required=False)
+    state = raw_state or {"orders": []}
     now, today = _clock(a)
+    if risk:
+        try:
+            checked = datetime.datetime.fromisoformat(risk["checked_at"].replace("Z", "+00:00"))
+            checked = checked.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+            age = (now - checked).total_seconds()
+            portfolio = read_json(a.portfolio, "portfolio", required=False)
+            prices = read_json(a.prices, "prices", required=False) or {}
+            context = [orders, cfg, portfolio, prices, raw_state]
+            digest = hashlib.sha256(json.dumps(context, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+            if age < 0 or age > 60 or digest != risk.get("context_fingerprint"):
+                risk = {"validation_error": "risk check expired or order, account, prices, config, or broker state changed; run check.py again"}
+        except (KeyError, ValueError, TypeError):
+            risk = {"validation_error": "risk check has no valid timestamp; run check.py again"}
     return orders, cfg, risk, state, today, now
 
 
@@ -659,6 +655,8 @@ def main(argv=None):
         p.add_argument("--config", default="trader/config.json")
         p.add_argument("--risk", default="trader/state/risk.json")
         p.add_argument("--state", default="trader/state/broker.json")
+        p.add_argument("--portfolio", default="trader/portfolio.json")
+        p.add_argument("--prices", default="trader/prices.json")
         clock(p)
 
     p = sub.add_parser("show", help="render the tickets")
@@ -681,7 +679,6 @@ def main(argv=None):
     p.add_argument("--note")
     p.add_argument("--filled-qty")
     p.add_argument("--filled-price")
-    p.add_argument("--portfolio", default="trader/portfolio.json")
     p = sub.add_parser("fill", help="record a fill in trader/portfolio.json")
     p.add_argument("--symbol", required=True)
     p.add_argument("--side", required=True, choices=["buy", "sell"])

@@ -219,8 +219,8 @@ def window_check(now_et, c):
     warns = []
     d, t = now_et.date(), now_et.time().replace(second=0, microsecond=0)
     if d.year not in CALENDAR_YEARS:
-        warns.append("the holiday list covers %s only: check nyse.com for %s"
-                     % (" and ".join(map(str, CALENDAR_YEARS)), d.isoformat()))
+        return ["window: unsupported market calendar year %s; update the NYSE calendar before entering"
+                % d.year], warns
     ok, why = trading_day(d)
     stamp = now_et.strftime("%a %Y-%m-%d %H:%M")
     if not ok:
@@ -374,7 +374,7 @@ def check(orders, cfg, portfolio=None, prices=None, state=None, today=None, now=
     """Pure function. Returns {"results": [...], "pass": n, "block": n, "warnings": [...]}.
 
     now          naive UTC (default: the real clock); its New York date is "today"
-    price_times  {SYM: naive UTC time of that price}; None = every price counts as fresh"""
+    price_times  {SYM: naive UTC time from the quote source}; missing timestamps are not fresh"""
     c = dict(DEFAULTS)
     c.update(cfg or {})
     prices = {str(k).upper(): float(v) for k, v in (prices or {}).items() if _f(v)}
@@ -408,7 +408,7 @@ def check(orders, cfg, portfolio=None, prices=None, state=None, today=None, now=
         if sym not in prices:
             return None
         if price_times is None:
-            return prices[sym]
+            return None
         t = price_times.get(sym)
         if t is None:
             return None
@@ -499,8 +499,6 @@ def check(orders, cfg, portfolio=None, prices=None, state=None, today=None, now=
                 if live and ref_from == "price" and plan_entry and live > plan_entry + CENT:
                     info.append("%s last %s is above the plan's entry %s: the risk is measured from %s"
                                 % (sym, _p(ref), _p(plan_entry), _p(ref)))
-            elif sym in prices:
-                ref, ref_from = prices[sym], "stale price"
         if plan_entry and live is None and sym in prices and price_times is not None and typ == "market":
             warns.append("the %s price in trader/prices.json is older than %d minutes: not used"
                          % (sym, FRESH_MINUTES))
@@ -523,6 +521,9 @@ def check(orders, cfg, portfolio=None, prices=None, state=None, today=None, now=
         elif side == "buy" and held < -1e-9 and q is not None:
             exiting = q <= -held + 1e-9
         kind = "exit" if exiting else "entry"
+        if kind == "entry" and typ == "market" and live is None:
+            later.append("price: a fresh timestamped source quote for %s is required for a market entry; "
+                         "refresh trader/prices.json" % sym)
         if kind == "entry" and value is None and q:
             later.append("price: no price for %s to size a %s-share order; add it to "
                          "trader/prices.json (trader-alerts: alerts.py quote %s --write)" % (sym, qty, sym))
@@ -580,6 +581,10 @@ def check(orders, cfg, portfolio=None, prices=None, state=None, today=None, now=
             if stop and not leg_stop:
                 warns.append("the stop %s is in the plan only, not at the broker: set a stop alert "
                              "(trader-alerts: alerts.py add --from-plan)" % _p(stop))
+                if c.get("require_stop", True):
+                    later.append("stop: a plan-only stop is not sent to the broker; include a bracket stop_loss_stop_price")
+            if leg_stop and oc != "bracket" and c.get("require_stop", True):
+                later.append("stop: set order_class to bracket so the stop is sent as a protective leg")
             if not stop:
                 if c.get("require_stop", True):
                     later.append("stop: no stop. Every entry needs one (\"require_stop\": true): a bracket "
@@ -669,13 +674,10 @@ def check(orders, cfg, portfolio=None, prices=None, state=None, today=None, now=
                 if value is not None:
                     acct["cash"] -= value
                     acct["values"][sym] = acct["values"].get(sym, 0.0) + value
-                if q is not None:
-                    acct["shares"][sym] = held + q
-                elif ref and value is not None:
-                    acct["shares"][sym] = held + value / ref
+                # Unfilled buys do not create shares available for a later sell.
             elif side == "sell":
                 if value is not None:
-                    acct["cash"] += value
+                    # Reserve holdings, but never spend proceeds before a confirmed fill.
                     acct["values"][sym] = max(acct["values"].get(sym, 0.0) - value, 0.0)
                 if q is not None:
                     acct["shares"][sym] = held - q
@@ -745,15 +747,14 @@ def report(res):
 def load_prices(pdoc):
     """prices.json -> ({SYM: price}, {SYM: price time as naive UTC or None}).
 
-    The price time is the quote's own time (detail.time), else when it was fetched
-    (detail.fetched), else the file's as_of."""
+    Only the source quote time (detail.time) establishes freshness. Fetch and
+    file timestamps do not prove that the underlying quote is current."""
     if not isinstance(pdoc, dict):
         return {}, {}
     prices = pdoc.get("prices", pdoc)
     if not isinstance(prices, dict):
         return {}, {}
     out, times = {}, {}
-    as_of = parse_utc(pdoc.get("as_of"))
     detail = pdoc.get("detail") or {}
     for s, p in prices.items():
         if _f(p) is None:
@@ -761,7 +762,7 @@ def load_prices(pdoc):
         s = str(s).upper()
         out[s] = float(p)
         d = detail.get(s) or {}
-        times[s] = parse_utc(d.get("time")) or parse_utc(d.get("fetched")) or as_of
+        times[s] = parse_utc(d.get("time"))
     return out, times
 
 
@@ -800,8 +801,9 @@ def main(argv=None):
             if d:
                 os.makedirs(d, exist_ok=True)
             rec = dict(res)
-            rec["checked_at"] = datetime.datetime.now(datetime.timezone.utc).replace(
-                microsecond=0, tzinfo=None).strftime("%Y-%m-%dT%H:%M:%SZ")
+            rec["checked_at"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+            context = json.dumps([orders, cfg, portfolio, pdoc, state], sort_keys=True, separators=(",", ":"))
+            rec["context_fingerprint"] = hashlib.sha256(context.encode("utf-8")).hexdigest()
             rec["orders_file"] = a.orders
             tmp = a.out + ".tmp"
             with open(tmp, "w", encoding="utf-8") as fh:

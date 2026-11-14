@@ -121,6 +121,17 @@ class Reel(unittest.TestCase):
         self.assertEqual((first["date"], first["entry"], first["stop"], first["target"], first["outcome"]),
                          ("2026-07-28", 307.97, 304.89, 311.05, "target"))
 
+    def test_history_gap_through_stop_uses_open_for_both_sides(self):
+        rule = {"or_minutes": 5, "stop_rule": "or_mid", "target_r": 1.0}
+        for side, entry, gap, low, high in (("buy", 101, 95, 94, 96),
+                                            ("sell", 97, 103, 102, 104)):
+            bars = [{"o": 99, "h": 100, "l": 98, "c": 99},
+                    {"o": entry, "h": entry, "l": entry, "c": entry},
+                    {"o": gap, "h": high, "l": low, "c": gap}]
+            trade = tm.history_replay([("2026-01-02", bars)], rule, 2, side)["trades"][0]
+            self.assertEqual(trade["outcome"], "stop")
+            self.assertEqual(trade["R"], -3.0)
+
     def test_the_verdict_says_coin_flip(self):
         self.assertEqual(self.doc["verdict"], "Close to a coin flip: target first 29.4 % vs stop first 25.5 %.")
         # 1R breaks even at 50 % of the replays that hit one side; the reel's target got 53.6 %

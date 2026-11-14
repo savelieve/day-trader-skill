@@ -1,4 +1,4 @@
-# The Day Trader skill
+# The Day Trader skill - improved
 
 11 Claude skills for day trading: scan thousands of charts, track breaking news, time every entry and exit, and replay every outcome before you risk a dollar.
 
@@ -21,12 +21,22 @@ an order on its own. Paper trading is the default.
 > [github.com/Jakeschincariol/trader-skill](https://github.com/Jakeschincariol/trader-skill).
 > This repo is its day-trading sequel: the Trader skill v2.
 
+## Safety changes in this version
+
+This independent improvement adds short-lived risk checks bound to the local
+order and account inputs, requires a broker-held bracket stop when configured,
+and rejects stale market data in entry risk checks and alerts. It does not
+connect the risk gate to the broker submission itself: verify the actual broker
+account, open orders and current quote immediately before approving a connector
+call. Paper-trade and independently validate the workflow before considering live
+use. Exchange calendar support is limited to 2026 and 2027.
+
 ## Install
 
 Paste this into Claude:
 
 ```
-https://github.com/Jakeschincariol/day-trader-skill
+https://github.com/savelieve/day-trader-skill-improved
 
 install skill
 ```
@@ -34,7 +44,7 @@ install skill
 Or as a plugin, in Claude Code:
 
 ```
-/plugin marketplace add Jakeschincariol/day-trader-skill
+/plugin marketplace add savelieve/day-trader-skill-improved
 /plugin install day-trader-skill@day-trader-skill
 ```
 
@@ -43,8 +53,8 @@ Claude Code namespaces plugin skills, so installed as a plugin they show up as
 plain `/trader-scanner`:
 
 ```bash
-git clone https://github.com/Jakeschincariol/day-trader-skill.git
-cp -r day-trader-skill/trader-* ~/.claude/skills/
+git clone https://github.com/savelieve/day-trader-skill-improved.git
+cp -r day-trader-skill-improved/trader-* ~/.claude/skills/
 ```
 
 Project-local instead of global: copy the same folders into your repo's
@@ -213,4 +223,4 @@ trader-pelosi/      SKILL.md, ptr.py
 tests/              unittest suite + offline fixtures
 ```
 
-MIT. Made by [Jake Schincariol](https://opusjake.ai).
+MIT. Based on the original work by [Jake Schincariol](https://opusjake.ai); this is an independent improved version.

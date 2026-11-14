@@ -75,7 +75,7 @@ close, so "flat by close" at 15:55 rings at 12:55 on those days.
   unofficial free JSON endpoint, one request per ticker, half a second apart.
   On a 429 it waits and tries once more; on a 429 or a 5xx after that it
   tries `query1`. It identifies itself as `day-trader-skill/2.0`.
-- `stooq`: `stooq.com/q/l/?s=tsla.us&f=sd2t2ohlcv&h&e=csv`, Stooq's free CSV.
+- `stooq`: `stooq.com/q/l/?s=tsla.us&f=sd2t2ohlcv&h&e=csv`, Stooq's free CSV. Its timestamp has no verified timezone, so `check` rejects it for price alerts; use a timezone-qualified Yahoo quote instead.
   It answered 404 on 2026-10-13; the parser stays for when it is back.
 - Free quotes are unofficial, delayed and can lag. They are fine for alerts
   and for checking a size, not for timing an order. The broker's price is the
@@ -83,7 +83,7 @@ close, so "flat by close" at 15:55 rings at 12:55 on those days.
   trader-risk only uses one under 15 minutes old.
 - If both are down, read the price from the broker connector (Alpaca
   `get_stock_snapshot`, IBKR `get_price_snapshot`) and write it into
-  `trader/prices.json` as `{"as_of": "...Z", "prices": {"TSLA": 366.48}}`.
+  `trader/prices.json` with the broker quote source timestamp, for example `{"prices": {"TSLA": 366.48}, "detail": {"TSLA": {"time": "2026-10-19T14:52:13Z"}}}`.
 
 ## The NYSE clock
 

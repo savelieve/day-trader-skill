@@ -198,6 +198,8 @@ def parse_hhmm(text, flag="--at"):
 
 def trading_day(d):
     """(is_trading_day, reason). Weekends and the NYSE holiday list."""
+    if d.year not in CALENDAR_YEARS:
+        raise ScanError("NYSE calendar unavailable for %s; update the calendar before scanning" % d.year)
     if d.weekday() >= 5:
         return False, "weekend"
     name = NYSE_HOLIDAYS.get(d.isoformat())
@@ -542,7 +544,20 @@ def find_setups(closes):
 def scan_daily(data, symbols, now_utc, min_price, min_volume):
     """Pure. data = {SYM: series}. Returns (hits, counts, last_date)."""
     hits, dates = [], {}
-    counts = {"requested": len(symbols), "fetched": 0, "illiquid": 0, "short": 0, "scanned": 0}
+    local = to_eastern(now_utc)
+    expected = local.date()
+    if expected.year not in CALENDAR_YEARS:
+        raise ScanError("NYSE calendar unavailable for %s; update the calendar before scanning" % expected.year)
+    today_session = session(expected)
+    if not today_session or local.time() < today_session[1]:
+        expected -= datetime.timedelta(days=1)
+    while True:
+        if expected.year not in CALENDAR_YEARS:
+            raise ScanError("NYSE calendar unavailable for %s; update the calendar before scanning" % expected.year)
+        if trading_day(expected)[0]:
+            break
+        expected -= datetime.timedelta(days=1)
+    counts = {"requested": len(symbols), "fetched": 0, "illiquid": 0, "short": 0, "scanned": 0, "stale": 0}
     for sym in symbols:
         s = data.get(sym)
         if not s:
@@ -559,6 +574,9 @@ def scan_daily(data, symbols, now_utc, min_price, min_volume):
             continue
         if len(bars) < MIN_DAILY_BARS:
             counts["short"] += 1
+            continue
+        if bars[-1][0] != expected:
+            counts["stale"] += 1
             continue
         counts["scanned"] += 1
         d_last = bars[-1][0]
@@ -896,7 +914,7 @@ def cmd_daily(a):
     nfailed = len(symbols) - counts["fetched"]
     as_of = ("%s close" % last_date.isoformat()) if last_date else None
     doc = {"created_by": "trader-scanner", "created_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "mode": "daily",
-           "as_of": as_of, "universe": len(symbols), "scanned": counts["scanned"], "failed": nfailed,
+           "as_of": as_of, "universe": len(symbols), "scanned": counts["scanned"], "failed": nfailed, "stale": counts["stale"],
            "source": "yahoo", "filters": {"min_price": a.min_price, "min_volume": a.min_volume},
            "note": NOTE, "hits": hits}
     if a.offline:
@@ -916,6 +934,8 @@ def cmd_daily(a):
                            "{:,}".format(a.min_volume),
                            (", %d had under %d days" % (counts["short"], MIN_DAILY_BARS)) if counts["short"] else "",
                            "{:,}".format(counts["scanned"])))
+    if counts["stale"]:
+        print("%d chart(s) skipped: last completed daily bar is stale." % counts["stale"])
     if hits:
         per = [(k, sum(1 for h in hits if k in h["setups"])) for k, _ in SETUPS]
         print("%d chart%s matched a setup: %s." % (len(hits), "" if len(hits) == 1 else "s",

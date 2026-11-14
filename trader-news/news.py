@@ -412,10 +412,9 @@ def select(items, state, now, hours=48, show_all=False):
     """Items within the window; only unseen ones unless show_all."""
     seen = state.setdefault("seen", {})
     cutoff = now - _dt.timedelta(hours=hours)
-    ahead = now + _dt.timedelta(minutes=10)  # a pinned --now: nothing from after it
     out = []
     for it in items:
-        if it["time"] is not None and (it["time"] < cutoff or it["time"] > ahead):
+        if it["time"] is not None and (it["time"] < cutoff or it["time"] > now):
             continue
         fp = fingerprint(it)
         it["new"] = fp not in seen
@@ -532,7 +531,7 @@ def main(argv=None):
     else:
         sys.stdout.write(render(shown, errors, now, moves, args.move_pct))
     if not args.dry_run:
-        remember(items, state, now)
+        remember(shown, state, now)
         folder = os.path.dirname(args.state)
         if folder:
             os.makedirs(folder, exist_ok=True)

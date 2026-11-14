@@ -451,7 +451,8 @@ def rule_stop(rule, oh, ol, entry, long):
 def history_replay(sessions, rule, last, side="buy"):
     """The plan's rule on every past full session: entry = the first bar after the
     opening range to close beyond it (up to the --until bar), then stop first, then
-    target, bar by bar, else the close at --until."""
+    target, bar by bar, else the close at --until. A gap through the stop
+    fills at the bar open; intrabar touches still assume a fill at the stop."""
     long = side == "buy"
     n = rule["or_minutes"] // 5
     trades = []
@@ -467,15 +468,18 @@ def history_replay(sessions, rule, last, side="buy"):
             continue
         t = round(e + rule["target_r"] * risk, 2) if long else round(e - rule["target_r"] * risk, 2)
         oc = None
+        stop_fill = s
         for b in D[kk + 1:last + 1]:
             if (b["l"] <= s) if long else (b["h"] >= s):
                 oc = "stop"
+                stop_fill = min(s, b["o"]) if long else max(s, b["o"])
                 break
             if (b["h"] >= t) if long else (b["l"] <= t):
                 oc = "target"
                 break
         cl = D[last]["c"]
-        R = ((t - e) if long else (e - t)) / risk if oc == "target" else -1.0 if oc == "stop" else \
+        R = ((t - e) if long else (e - t)) / risk if oc == "target" else \
+            ((stop_fill - e) if long else (e - stop_fill)) / risk if oc == "stop" else \
             ((cl - e) if long else (e - cl)) / risk
         trades.append({"date": d, "time": clock12(OPEN_MIN + 5 * (kk + 1)), "entry": e, "stop": s, "target": t,
                        "outcome": oc or "close", "R": round(R, 2)})

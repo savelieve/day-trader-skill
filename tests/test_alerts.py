@@ -83,7 +83,9 @@ class Calendar(unittest.TestCase):
         self.assertEqual(xmas["next_open"], "2027-12-27 09:30")
         self.assertTrue(alerts.market_status(ny("2027-12-31T10:00"))["open"])
         self.assertEqual(alerts.market_status(ny("2026-10-17T10:00"))["reason"], "weekend")
-        self.assertFalse(alerts.market_status(ny("2028-03-01T10:00"))["calendar_known"])
+        with self.assertRaises(alerts.AlertError):
+            alerts.market_status(ny("2028-03-01T10:00"))
+        self.assertNotIn("next_open", alerts.market_status(ny("2027-12-31T16:00")))
 
 
 class Quotes(unittest.TestCase):
@@ -210,6 +212,8 @@ class Network(unittest.TestCase):
 class Rules(unittest.TestCase):
     def setUp(self):
         self.q, _ = alerts.get_quotes(["AAPL", "BAC", "KO", "TSLA"], "yahoo", QDIR)
+        for symbol in ("AAPL", "BAC", "KO"):
+            self.q[symbol]["time"] = "2026-10-13T14:00:00Z"
         self.open = alerts.market_status(ny("2026-10-13T10:00"))
         self.now = ny("2026-10-13T10:00")
 
@@ -217,6 +221,16 @@ class Rules(unittest.TestCase):
         now = ny(text)
         return alerts.evaluate(rules, self.q if quotes is None else quotes, alerts.market_status(now),
                                state or {}, now)
+
+    def test_stale_future_and_missing_quotes_do_not_ring_or_rearm(self):
+        rule = [{"id": "stop", "symbol": "AAPL", "type": "stop", "price": 350, "rearm": True}]
+        for stamp in ("2026-10-12T14:00:00Z", "2026-10-13T14:00:01Z", ""):
+            quote = {"AAPL": {"price": 340, "time": stamp}}
+            rings, state = alerts.evaluate(rule, quote, self.open, {"rung": {"stop": "old"}}, self.now)
+            self.assertEqual(rings, [])
+            self.assertEqual(state["rung"]["stop"], "old")
+        quote = {"AAPL": {"price": 340, "time": "2026-10-13T13:59:59Z"}}
+        self.assertEqual(len(alerts.evaluate(rule, quote, self.open, {}, self.now)[0]), 1)
 
     def test_a_target_rings_once(self):
         rules = [{"id": "aapl-340", "symbol": "AAPL", "type": "above", "price": 340}]
@@ -248,7 +262,7 @@ class Rules(unittest.TestCase):
         up = [{"id": "bac-up", "symbol": "BAC", "type": "pct_move", "pct": 1, "direction": "up"}]
         self.assertEqual(alerts.evaluate(up, self.q, self.open, {}, self.now)[0], [])
         tsla = [{"id": "tsla-3", "symbol": "TSLA", "type": "pct_move", "pct": 3}]
-        rings, _ = self.at("2026-10-19 10:52", tsla)
+        rings, _ = self.at("2026-10-19 10:53", tsla)
         self.assertIn("TSLA moved +3.31% to $366.48 (from $354.72)", rings[0]["message"])
 
     def test_opening_bell_once_per_trading_day(self):
@@ -271,11 +285,13 @@ class Rules(unittest.TestCase):
         rings, st = self.at("2026-10-19 10:52", rules)          # the real 10:52 quote, 366.475
         self.assertEqual(rings, [])
         q = json.loads(json.dumps(self.q))
+        q["TSLA"]["time"] = "2026-10-19T15:30:00Z"
         q["TSLA"]["price"] = 358.10
         rings, st = self.at("2026-10-19 11:30", rules, st, q)
         self.assertEqual([r["id"] for r in rings], ["tsla-plan-stop"])
         self.assertIn("TSLA is $358.10: at or below your stop $358.32 (plan stop: opening-range midpoint)",
                       rings[0]["message"])
+        q["TSLA"]["time"] = "2026-10-19T16:00:00Z"
         q["TSLA"]["price"] = 370.04
         self.assertEqual([r["id"] for r in self.at("2026-10-19 12:00", rules, st, q)[0]], ["tsla-plan-target"])
 
@@ -381,7 +397,7 @@ class Cli(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("already exists", err)
 
-        code, text, _ = self.check("2026-10-13T20:00")
+        code, text, _ = self.check("2026-10-13T16:00:02")
         self.assertEqual(code, 1)
         self.assertIn("Nothing hit", text)
         with open(self.prices) as fh:

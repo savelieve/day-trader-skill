@@ -200,6 +200,8 @@ def ampm(t):
 
 def trading_day(d):
     """(is_trading_day, reason). Weekends and the NYSE holiday list."""
+    if d.year not in CALENDAR_YEARS:
+        raise EntryError("NYSE calendar unavailable for %s; update the calendar before continuing" % d.year)
     if d.weekday() >= 5:
         return False, "weekend"
     name = NYSE_HOLIDAYS.get(d.isoformat())
@@ -219,6 +221,8 @@ def session(d):
 def next_open(d):
     nd = d + datetime.timedelta(days=1)
     for _ in range(15):
+        if nd.year not in CALENDAR_YEARS:
+            break
         if session(nd):
             return "%s 09:30" % nd.isoformat()
         nd += datetime.timedelta(days=1)

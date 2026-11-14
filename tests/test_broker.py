@@ -42,29 +42,11 @@ class ExplicitYes(unittest.TestCase):
     def yes(self, reply, order=AAPL, batch=BATCH):
         return ticket.parse_yes(reply, order, batch)[0]
 
-    def test_plain_yes_counts(self):
-        for r in ("yes", "Yes.", "YES", "y", "yes place it", "Yes, buy it", "yes AAPL", "yes $1,250 of AAPL",
-                  "yes 1250"):
-            self.assertTrue(self.yes(r), r)
-
-    def test_anything_else_does_not(self):
-        for r in ("", "sure", "ok", "okay", "go", "do it", "yeah", "yep", "absolutely", "send it",
-                  "yes to all", "yes, all of them", "yes to the rest", "yes both",
-                  "yes AXP", "yes 1000", "yes but make it 1000", "yes?", "no", "not yes",
-                  "yes, wait", "yes if it is under 340"):
-            self.assertFalse(self.yes(r), r)
-
-    def test_amount_must_match_this_order(self):
-        sell = {"symbol": "KO", "side": "sell", "qty": "3", "type": "market", "time_in_force": "day"}
-        self.assertTrue(self.yes("yes sell 3 KO", sell))
-        self.assertFalse(self.yes("yes sell 4", sell))
-
-    def test_a_bracket_yes(self):
-        o = tsla()
-        for r in ("yes", "yes 8 TSLA", "yes 358.32", "yes max loss 46.88", "yes target 370.04"):
-            self.assertTrue(self.yes(r, o, ["TSLA"]), r)
-        for r in ("yes 9", "yes 10 TSLA", "yes but stop at 357", "yes, stop 358.32", "yes AAPL", "sure"):
-            self.assertFalse(self.yes(r, o, ["TSLA", "AAPL"]), r)
+    def test_only_unambiguous_yes(self):
+        for reply in ("yes", "Yes.", "YES", "y"):
+            self.assertTrue(self.yes(reply), reply)
+        for reply in ("yes AAPL", "yes 8 TSLA at 999", "yes to all", "sure", "yes?", "no"):
+            self.assertFalse(self.yes(reply, tsla(), ["TSLA"]), reply)
 
 
 class TicketShape(unittest.TestCase):
@@ -114,22 +96,36 @@ class Flow(unittest.TestCase):
         self.state = os.path.join(self.d, "state", "broker.json")
         self.pf = os.path.join(self.d, "portfolio.json")
         self.none = os.path.join(self.d, "none")
+        self.prices = os.path.join(self.d, "prices.json")
 
     def tearDown(self):
         shutil.rmtree(self.d)
 
     def args(self, *extra, **kw):
         return list(extra) + ["--orders", self.orders, "--config", self.cfg, "--risk", self.risk,
-                              "--state", self.state, "--now", kw.get("now", NOW)]
+                              "--state", self.state, "--portfolio", self.pf, "--prices", self.prices, "--now", kw.get("now", NOW)]
 
     def run_risk(self, now=NOW):
+        stamp = check.parse_now(now).isoformat() + "Z"
+        with open(self.prices, "w", encoding="utf-8") as fh:
+            json.dump({"prices": {"TSLA": 364.18}, "detail": {"TSLA": {"time": stamp}}}, fh)
         with redirect_stdout(io.StringIO()):
             return check.main(["--orders", self.orders, "--config", self.cfg, "--portfolio", self.pf,
-                               "--prices", self.none, "--state", self.state, "--now", now, "--out", self.risk])
+                               "--prices", self.prices, "--state", self.state, "--now", now, "--out", self.risk])
 
     def state_doc(self):
         with open(self.state) as fh:
             return json.load(fh)
+
+    def test_risk_expires_and_context_changes_invalidate_it(self):
+        self.assertEqual(self.run_risk(), 0)
+        self.assertEqual(run(self.args("show", now="2026-10-19 10:17"))[0], 1)
+        with open(self.cfg, encoding="utf-8") as fh:
+            cfg = json.load(fh)
+        cfg["budget"] = 1
+        with open(self.cfg, "w", encoding="utf-8") as fh:
+            json.dump(cfg, fh)
+        self.assertEqual(run(self.args("approve", "--index", "1", "--reply", "yes"))[0], 1)
 
     def test_nothing_is_ready_before_the_risk_check(self):
         code, text, _ = run(self.args("show"))
@@ -215,7 +211,7 @@ class Flow(unittest.TestCase):
         code, text, _ = run(self.args("show", now=late))
         self.assertEqual(code, 0)
         self.assertIn("READY", text)
-        self.assertEqual(run(self.args("approve", "--index", "1", "--reply", "yes sell 8 TSLA", now=late))[0], 0)
+        self.assertEqual(run(self.args("approve", "--index", "1", "--reply", "yes", now=late))[0], 0)
         code, _, _ = run(self.args("result", "--index", "1", "--status", "placed", "--filled-qty", "8",
                                    "--filled-price", "366.10", "--portfolio", self.pf, now="2026-10-19 15:56"))
         self.assertEqual(code, 0)
@@ -244,12 +240,12 @@ class Flow(unittest.TestCase):
             json.dump(doc, fh)
         code, text, _ = run(self.args("show", "--index", "1"))
         self.assertEqual(code, 1)
-        self.assertIn("was not in the last risk check", text)
+        self.assertIn("order, account, prices, config, or broker state changed", text)
 
     def test_yesterdays_check_does_not_count(self):
         self.run_risk(now="2026-10-16 10:15")
         code, text, _ = run(self.args("show", "--index", "1"))
-        self.assertIn("not today", text)
+        self.assertIn("risk check expired", text)
 
     def test_blocked_orders_are_never_ready(self):
         self.assertEqual(self.run_risk(now="2026-10-19 09:40"), 1)

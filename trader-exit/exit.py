@@ -88,6 +88,7 @@ NYSE_EARLY_CLOSE = {  # 1:00 p.m. ET
     "2026-12-24": "Christmas Eve",
     "2027-11-26": "day after Thanksgiving",
 }
+CALENDAR_YEARS = (2026, 2027)
 OPEN = datetime.time(9, 30)
 CLOSE = datetime.time(16, 0)
 EARLY = datetime.time(13, 0)
@@ -186,6 +187,8 @@ def ampm(t):
 
 def session(d):
     """(open_time, close_time) in New York time, or None if closed all day."""
+    if d.year not in CALENDAR_YEARS:
+        raise PlanError("NYSE calendar unavailable for %s; update the calendar before continuing" % d.year)
     if d.weekday() >= 5 or d.isoformat() in NYSE_HOLIDAYS:
         return None
     return OPEN, (EARLY if d.isoformat() in NYSE_EARLY_CLOSE else CLOSE)

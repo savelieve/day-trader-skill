@@ -203,6 +203,15 @@ class Check(unittest.TestCase):
         self.assertNotIn("old", state["seen"])
         self.assertEqual(state["last_check"], now.isoformat())
 
+    def test_future_news_is_not_marked_seen_during_replay(self):
+        base = ["--tickers", "AAPL", "--offline", DIR, "--state", self.state,
+                "--no-sec", "--no-moves", "--json"]
+        _, first, _ = run(base + ["--now", "2026-10-13T19:00:00+00:00"])
+        _, later, _ = run(base + ["--now", "2026-10-13T20:00:00+00:00"])
+        title = "Apple may have a way to dominate the smart home space"
+        self.assertNotIn(title, [item["title"] for item in json.loads(first)["items"]])
+        self.assertIn(title, [item["title"] for item in json.loads(later)["items"]])
+
 
 if __name__ == "__main__":
     unittest.main()

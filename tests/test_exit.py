@@ -1,6 +1,7 @@
 """trader-exit tests. Bars for the ATR stop reuse tests/fixtures/trader-entry/
 (TSLA's real Oct 19 2026 five-minute bars, see test_entry.py)."""
 
+import datetime
 import io
 import json
 import os
@@ -288,3 +289,9 @@ class SkillDoc(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CalendarCoverage(unittest.TestCase):
+    def test_unsupported_calendar_year_is_rejected(self):
+        with self.assertRaises(exitp.PlanError):
+            exitp.session(datetime.date(2028, 3, 1))

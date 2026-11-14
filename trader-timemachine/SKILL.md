@@ -70,7 +70,9 @@ bars), `--offline FILE` (a saved Yahoo chart JSON, `.json` or `.json.gz`),
    counts as -1R here. A real fill can be worse.
 4. **The history.** The plan's own rule (the same opening range, stop rule
    and target R) runs again on every one of those past sessions. That is
-   what really happened, not a simulation.
+   historical-bar replay, not actual fills. If a bar opens past the stop it
+   uses that opening price; other stop touches fill at the stop. Slippage,
+   fees, and the order of moves within a bar are not known.
 5. **The verdict** is one line from the numbers. It looks only at the
    replays that hit one side, and asks how often the target came first. A
    bigger target needs to win less often to break even: 1 in (1 + R). That

@@ -147,6 +147,8 @@ def parse_now(text):
 
 def trading_day(d):
     """(is_trading_day, reason). Weekends and the NYSE holiday list."""
+    if d.year not in CALENDAR_YEARS:
+        raise AlertError("NYSE calendar unavailable for %s; update the calendar before continuing" % d.year)
     if d.weekday() >= 5:
         return False, "weekend"
     name = NYSE_HOLIDAYS.get(d.isoformat())
@@ -184,6 +186,8 @@ def market_status(now_utc):
     # next open
     nd = d if (s and local.time() < s[0]) else d + datetime.timedelta(days=1)
     for _ in range(15):
+        if nd.year not in CALENDAR_YEARS:
+            break
         if session(nd):
             st["next_open"] = "%s 09:30" % nd.isoformat()
             break
@@ -425,6 +429,20 @@ def ring_time(rule, status):
     return at
 
 
+def quote_fresh(q, now_utc):
+    """Require a timezone-qualified quote no older than five minutes."""
+    try:
+        raw = q.get("time") or ""
+        when = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if when.tzinfo is None:
+            return False
+        when = (when - when.utcoffset()).replace(tzinfo=None)
+        age = (now_utc - when).total_seconds()
+        return 0 <= age <= 300
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def evaluate(rules, quotes, status, state, now_utc):
     """Pure function. Returns (rings, new_state). Each ring: {id, symbol, message}."""
     state = json.loads(json.dumps(state or {}))
@@ -463,7 +481,7 @@ def evaluate(rules, quotes, status, state, now_utc):
             continue
         sym = r["symbol"].upper()
         q = quotes.get(sym)
-        if not q:
+        if not q or not quote_fresh(q, now_utc):
             continue
         p = q["price"]
         if typ in ("above", "below"):
@@ -595,6 +613,10 @@ def cmd_check(a):
     watched = [r for r in rules if active(r, status["date"])]
     syms = _dedupe([str(r.get("symbol", "")).upper() for r in watched if r.get("type") not in NO_QUOTE])
     quotes, errors = (get_quotes(syms, a.source, a.offline) if syms else ({}, []))
+    for sym, q in list(quotes.items()):
+        if not quote_fresh(q, now):
+            errors.append("%s quote is stale, future-dated, or has no timezone-qualified timestamp; alert skipped" % sym)
+            del quotes[sym]
     state = _read(a.state, {})
     rings, state = evaluate(rules, quotes, status, state, now)
     if not a.no_write:

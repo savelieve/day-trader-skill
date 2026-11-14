@@ -261,11 +261,21 @@ class Daily(unittest.TestCase):
         self.assertEqual({h["symbol"]: h["setups"] for h in hits}, self.EXPECT)
         self.assertEqual(last, D(2026, 10, 16))
         self.assertEqual(counts, {"requested": 19, "fetched": 19, "illiquid": 0, "short": 0, "scanned": 19,
-                                  "hits": 15})
+                                  "stale": 0, "hits": 15})
         for sym, tag in self.REEL.items():
             self.assertIn(tag, self.EXPECT[sym], sym)
         blk = [h for h in hits if h["symbol"] == "BLK"][0]
         self.assertEqual((blk["price"], blk["rsi"], blk["close_date"]), (1134.38, 63.7, "2026-10-16"))
+
+    def test_stale_daily_bars_are_skipped(self):
+        hits, counts, last = scan.scan_daily(self.data, self.syms, scan.parse_now("2026-11-14 10:15"), 0, 0)
+        self.assertEqual(hits, [])
+        self.assertEqual(counts["stale"], len(self.syms))
+        self.assertIsNone(last)
+
+    def test_unknown_calendar_year_is_rejected(self):
+        with self.assertRaises(scan.ScanError):
+            scan.scan_daily(self.data, self.syms, scan.parse_now("2028-02-01 10:15"), 0, 0)
 
     def test_the_in_progress_bar_is_dropped(self):
         before = scan.scan_daily(self.data, self.syms, scan.parse_now("2026-10-19 09:00"), 0, 0)

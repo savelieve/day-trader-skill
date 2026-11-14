@@ -292,7 +292,8 @@ class Calendar(unittest.TestCase):
         self.assertEqual((r["status"], r["phase"]), ("no-data", "open"))
         r = at("2026-10-20 10:15")                                # Yahoo sent yesterday's bars only
         self.assertEqual(r["status"], "no-data")
-        self.assertFalse(at("2028-03-01 10:30")["calendar_known"])
+        with self.assertRaises(entry.EntryError):
+            at("2028-03-01 10:30")
 
     def test_yahoo_errors(self):
         bad = json.dumps({"chart": {"result": None, "error": {"code": "Not Found",
